@@ -150,7 +150,7 @@ func updateSteampipeGcpConfigFile(projects []GcpProject) error {
 	// Create aggregation string
 	var aggregationParts []string
 	for _, project := range projects {
-		aggregationParts = append(aggregationParts, fmt.Sprintf("'gcp_%s'", project.NormalizedName))
+		aggregationParts = append(aggregationParts, fmt.Sprintf("\"gcp_%s\"", project.NormalizedName))
 	}
 
 	data := TemplateData{
