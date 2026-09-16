@@ -7,6 +7,7 @@ import (
 	"github.com/jessevdk/go-flags"
 	"github.com/tamu-edu/aiphelper/aws"
 	"github.com/tamu-edu/aiphelper/azure"
+	"github.com/tamu-edu/aiphelper/gcp"
 	"github.com/tamu-edu/aiphelper/utils"
 )
 
@@ -31,9 +32,10 @@ func main() {
 
 	aws.AddCommand(p, &opts)
 	azure.AddCommand(p)
+	gcp.AddCommand(p)
 
 	_, err := p.Parse()
-	fmt.Printf("After parsing: KionUrl=%s\n", opts.KionUrl)
+	// fmt.Printf("After parsing: KionUrl=%s\n", opts.KionUrl)
 	// Set the debug flag in the utils package
 	utils.DebugEnabled = opts.Debug
 
@@ -52,6 +54,8 @@ func main() {
 		aws.Init()
 	case "azure":
 		azure.Init()
+	case "gcp":
+		gcp.Init()
 	}
 }
 

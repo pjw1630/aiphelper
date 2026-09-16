@@ -1,0 +1,16 @@
+### {{$.Marker}}_START ###
+
+connection "gcp_all" {
+  plugin      = "gcp"
+  type        = "aggregator"
+  connections = [{{.AggregationString}}]
+}
+
+{{range .Projects}}
+connection "gcp_{{.NormalizedName}}" {
+  plugin    = "gcp"
+  project   = "{{.ID}}"
+}
+{{end}}
+
+### {{$.Marker}}_END ###

@@ -108,3 +108,10 @@ func SplitArgumentParser(value string) []string {
 	var delimiter = regexp.MustCompile("[, ] *")
 	return delimiter.Split(value, -1)
 }
+
+func JoinStrings(strSlice []string, separator string) string {
+	if len(strSlice) == 0 {
+		return ""
+	}
+	return strings.Join(strSlice, separator)
+}
