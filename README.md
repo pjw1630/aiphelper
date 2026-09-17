@@ -160,10 +160,10 @@ aiphelper gcp --organization-id=874260368814 --auth-method=gcloud
 aiphelper gcp --organization-id=874260368814 --auth-method=service-account --service-account-key=key.json
 
 # Query a single project connector in Steampipe
-steampipe query 'select * from gcp_my_project.compute_instance'
+steampipe query 'select name from gcp_my_project.gcp_project'
 
 # Query all discovered projects using the aggregate connector
-steampipe query 'select * from gcp_all.compute_instance'
+steampipe query 'select name from gcp_all.gcp_project'
 ```
 
 ## Steampipe
