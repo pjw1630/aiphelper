@@ -15,6 +15,7 @@ import (
 	resourcemanager "cloud.google.com/go/resourcemanager/apiv3"
 	"cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	"golang.org/x/oauth2/google"
+	"google.golang.org/api/cloudbilling/v1"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 
@@ -25,6 +26,8 @@ var (
 	steampipeTemplate *template.Template
 )
 
+const defaultBillingAccountIDs = "0165A9-BB7960-BC03A5,01C436-796D88-EA0292,0152CF-9A23B4-75E0E7,01030B-9E8B49-9B4A3C,015F25-032066-F3230A"
+
 //go:embed steampipe.gospc
 var steampipeTemplateString string
 
@@ -33,6 +36,7 @@ type Options struct {
 	OrganizationID       string `long:"organization-id" default:"874260368814" description:"GCP Organization ID"`
 	AuthenticationMethod string `long:"auth-method" default:"default" description:"Authentication method (default, service-account, gcloud)"`
 	ServiceAccountKey    string `long:"service-account-key" description:"Path to service account key file"`
+	BillingAccountIDs    string `long:"billing-account-ids" default:"0165A9-BB7960-BC03A5,01C436-796D88-EA0292,0152CF-9A23B4-75E0E7,01030B-9E8B49-9B4A3C,015F25-032066-F3230A" description:"Comma-separated GCP billing account IDs; empty disables filtering"`
 }
 
 type GcpProject struct {
@@ -64,11 +68,26 @@ func Init() {
 		log.Fatalf("Failed to create GCP folders client: %v", err)
 	}
 	defer foldersClient.Close()
+	billingService, err := newBillingService(ctx)
+	if err != nil {
+		log.Fatalf("Failed to create GCP billing service: %v", err)
+	}
+	billingAccountIDs, err := parseBillingAccountIDs(options.BillingAccountIDs)
+	if err != nil {
+		log.Fatalf("Invalid billing account IDs: %v", err)
+	}
 
 	// Enumerate projects
 	projects, err := enumerateProjects(ctx, client, foldersClient)
 	if err != nil {
 		log.Fatalf("Failed to enumerate projects: %v", err)
+	}
+	if len(billingAccountIDs) > 0 {
+		associatedProjectIDs, err := associatedProjectIDs(ctx, billingService, billingAccountIDs)
+		if err != nil {
+			log.Fatalf("Failed to list billing account project associations: %v", err)
+		}
+		projects = filterProjectsByID(projects, associatedProjectIDs)
 	}
 
 	if len(projects) == 0 {
@@ -82,6 +101,26 @@ func Init() {
 	}
 
 	fmt.Printf("Successfully generated Steampipe configuration for %d GCP projects\n", len(projects))
+}
+
+func newBillingService(ctx context.Context) (*cloudbilling.APIService, error) {
+	switch options.AuthenticationMethod {
+	case "service-account":
+		if options.ServiceAccountKey == "" {
+			return nil, fmt.Errorf("service account key file path is required for service-account authentication")
+		}
+		return cloudbilling.NewService(ctx, option.WithCredentialsFile(options.ServiceAccountKey))
+	case "gcloud":
+		return cloudbilling.NewService(ctx, option.WithCredentialsFile(filepath.Join(os.Getenv("HOME"), ".config", "gcloud", "application_default_credentials.json")))
+	case "default":
+		credentials, err := google.FindDefaultCredentials(ctx, cloudbilling.CloudBillingScope)
+		if err != nil {
+			return nil, fmt.Errorf("failed to find default credentials: %v", err)
+		}
+		return cloudbilling.NewService(ctx, option.WithCredentials(credentials))
+	default:
+		return cloudbilling.NewService(ctx)
+	}
 }
 
 func newProjectsClient(ctx context.Context) (*resourcemanager.ProjectsClient, error) {
@@ -147,7 +186,6 @@ func enumerateProjectsUnderParent(ctx context.Context, projectsClient *resourcem
 		if err != nil {
 			return nil, fmt.Errorf("failed to iterate projects: %v", err)
 		}
-
 		// Skip deleted projects (commented out as Project_DELETED is not available in current API)
 		// if project.GetState() == resourcemanagerpb.Project_DELETED {
 		// 	continue
@@ -183,6 +221,51 @@ func enumerateProjectsUnderParent(ctx context.Context, projectsClient *resourcem
 	}
 
 	return projects, nil
+}
+
+func associatedProjectIDs(ctx context.Context, service *cloudbilling.APIService, billingAccountIDs map[string]struct{}) (map[string]struct{}, error) {
+	projectIDs := make(map[string]struct{})
+	for billingAccountID := range billingAccountIDs {
+		billingAccountName := "billingAccounts/" + billingAccountID
+		err := service.BillingAccounts.Projects.List(billingAccountName).Pages(ctx, func(page *cloudbilling.ListProjectBillingInfoResponse) error {
+			for _, projectBillingInfo := range page.ProjectBillingInfo {
+				if projectBillingInfo.ProjectId != "" {
+					projectIDs[projectBillingInfo.ProjectId] = struct{}{}
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to list projects for billing account %s: %v", billingAccountID, err)
+		}
+	}
+	return projectIDs, nil
+}
+
+func filterProjectsByID(projects []GcpProject, associatedIDs map[string]struct{}) []GcpProject {
+	filtered := make([]GcpProject, 0, len(projects))
+	for _, project := range projects {
+		if _, ok := associatedIDs[project.ID]; ok {
+			filtered = append(filtered, project)
+		}
+	}
+	return filtered
+}
+
+func parseBillingAccountIDs(value string) (map[string]struct{}, error) {
+	ids := make(map[string]struct{})
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ids, nil
+	}
+	for _, rawID := range strings.Split(value, ",") {
+		id := strings.TrimSpace(rawID)
+		if id == "" {
+			return nil, fmt.Errorf("billing account ID list contains an empty value")
+		}
+		ids[id] = struct{}{}
+	}
+	return ids, nil
 }
 
 func listProjectsRequest(organizationID string) (*resourcemanagerpb.ListProjectsRequest, error) {

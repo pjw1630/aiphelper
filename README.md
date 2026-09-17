@@ -70,6 +70,7 @@ Available commands:
       --organization-id=        GCP Organization ID (default: 874260368814)
       --auth-method=            Authentication method (default, service-account, gcloud) (default: default)
       --service-account-key=    Path to service account key file
+      --billing-account-ids=    Comma-separated GCP billing account IDs; empty disables filtering (default: 0165A9-BB7960-BC03A5,01C436-796D88-EA0292,0152CF-9A23B4-75E0E7,01030B-9E8B49-9B4A3C,015F25-032066-F3230A)
 ```
 
 ## Cloud Providers
@@ -118,6 +119,8 @@ The `gcloud` authentication method uses application default credentials from `~/
 
 For service account authentication, pass `--auth-method=service-account --service-account-key=<path-to-key.json>`.
 
+By default, only projects linked to the configured billing account IDs are included. Use `--billing-account-ids=` to include all discovered projects, or provide a comma-separated custom list. Project associations are listed once per billing account to avoid Cloud Billing per-project request quotas. The authenticated identity must have `billing.resourceAssociations.list` on each configured billing account.
+
 ## Environment Variables
 
 | Variable | Description |
@@ -158,6 +161,12 @@ aiphelper gcp --organization-id=874260368814 --auth-method=gcloud
 
 # Discover projects in a specific organization using a service account
 aiphelper gcp --organization-id=874260368814 --auth-method=service-account --service-account-key=key.json
+
+# Discover all projects without billing-account filtering
+aiphelper gcp --billing-account-ids=
+
+# Discover projects linked to a custom billing-account list
+aiphelper gcp --billing-account-ids=0165A9-BB7960-BC03A5,01C436-796D88-EA0292
 
 # Query a single project connector in Steampipe
 steampipe query 'select name from gcp_my_project.gcp_project'
@@ -201,6 +210,14 @@ Verify local authentication status with native tools: `az login`, `gcloud auth l
 ### Missing Accounts, Subscriptions, or Projects
 
 Confirm your identity has the required permissions for discovery, such as `resourcemanager.projects.list` for GCP projects.
+
+For the default billing filter, grant `billing.resourceAssociations.list` on each configured billing account. If this permission is denied, the GCP command cannot apply the billing filter.
+
+### Cloud Billing API has not been used in project before or it is disabled
+
+Enable the Cloud Billing API in your ADC quota project.
+
+`gcloud services enable cloudbilling.googleapis.com --project=your-adc-quota-project-id`
 
 ### Verbose Output
 
