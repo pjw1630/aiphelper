@@ -1,18 +1,30 @@
-# AIP Profile Helper
+# AIP Profile Helper (`aiphelper`)
 
-`aiphelper` automates local CLI configuration and Steampipe connection files across AWS, Azure, and GCP multi-cloud environments. For AWS, it creates [AWS CLI profiles](https://docs.aws.amazon.com/cli/v1/userguide/cli-configure-files.html#cli-configure-files-format) for each account and role you can access. For Azure and GCP, it discovers accessible subscriptions or projects and generates matching Steampipe connectors.
+`aiphelper` automates local CLI configurations and Steampipe connection files across AWS, Azure, and GCP multi-cloud environments.
 
-Generated configuration is managed between `### AIPHELPER_MARKER_[START|END] ###` blocks, so existing custom configuration outside those markers is preserved.
+It generates AWS CLI profiles for accessible accounts and roles, discovers Azure subscriptions and GCP projects, and outputs matching Steampipe connectors. All generated configurations are isolated within `### AIPHELPER_MARKER_[START|END] ###` blocks to preserve your existing custom settings.
+
+---
+
+## Features
+
+* **AWS CLI & Steampipe Management:** Automatically generates profile names (`<account>_<role>`) and writes them to `~/.aws/config` and `~/.steampipe/config/aws.spc`.
+* **Kion & AWS SSO Integration:** Integrates with Kion API/CLI for short-term credential generation and AWS Identity Center (SSO).
+* **Multi-Cloud Discovery:** Auto-discovers Azure Subscriptions and GCP Projects under specified organizations/billing accounts.
+* **Aggregate Connectors:** Generates multi-account Steampipe aggregate connectors (`aws_role_<role>`, `azure_all`, `gcp_all`) for cross-environment querying.
+* **Non-Destructive:** Safeguards existing local configuration outside marker blocks.
+
+---
 
 ## Prerequisites & Installation
 
 ### Prerequisites
 
-- Go 1.27.1 or later
-- Git
-- Local cloud authentication credentials for the providers you want to configure
+* **Go:** 1.27.1 or higher
+* **Git**
+* Authenticated local CLI tools (`kion-cli`, `az`, `gcloud`) depending on the providers used.
 
-### Building from Source
+### Installation
 
 ```bash
 # Clone the repository
@@ -22,203 +34,169 @@ cd aiphelper
 # Build the binary
 go build -o aiphelper .
 
-# Optional: install globally
+# Optional: Install globally to $GOPATH/bin
 go install
+
 ```
 
-## Usage
+---
 
-```text
-Usage:
-  aiphelper [OPTIONS] <aws | azure | gcp>
+## Usage Syntax
 
-Application Options:
-  -V, --version       aiphelper Version
-  -d, --debug         Enable debug logging
-      --kion-url=     Kion URL to use for profile generation (env: KION_URL)
-      --kion-apikey=  Kion API token for authentication (env: KION_APIKEY)
+```bash
+aiphelper [GLOBAL OPTIONS] <aws | azure | gcp> [COMMAND OPTIONS]
 
-Help Options:
-  -h, --help  Show this help message
-
-Available commands:
-  aws    Initialize AWS
-  azure  Initialize Azure
-  gcp    Initialize GCP
-
-[aws command options]
-      Account Source Options (exactly one required):
-          --from-sso     Use AWS Identity Center to get account list
-          --from-kion    Use Kion API to get account list
-
-          --sso-start-url=  AWS SSO Start URL (default: https://aggie-innovation-platform.awsapps.com/start)
-          --sso-region=     AWS SSO Region (default: us-east-2)
-          --sso-role-name=  SSO Role To Assume (must be the same across all accounts) (default: AdministratorAccess)
-          --regions=        Comma-separated list of regions to tell Steampipe to connect to (default: uses same search order as aws cli)
-          --accounts=       Comma-separated list of accounts to tell Steampipe to connect to (default: all accounts assigned to you through SSO)
-          --output-format=  Output format for AWS CLI (default: json)
-          --default-region= Default region for AWS CLI operations (default: us-east-1)
-
-[azure command options]
-          --tenant-id=       Azure Tenant ID (default: 68f381e3-46da-47b9-ba57-6f322b8f0da1)
-      -g, --enum-mgmt-group  Enumerate Azure Management Group descendants for a list of Subscriptions
-          --root-group=      management group IDs to begin search for subscriptions (default: tamu)
-          --auth-method=     Authentication method to use. Options: [environment, cli, managed-identity, device-code, default] (default: default)
-
-[gcp command options]
-      --project-id=             GCP Project ID
-      --organization-id=        GCP Organization ID (default: 874260368814)
-      --auth-method=            Authentication method (default, service-account, gcloud) (default: default)
-      --service-account-key=    Path to service account key file
-      --billing-account-ids=    Comma-separated GCP billing account IDs; empty disables filtering (default: 0165A9-BB7960-BC03A5,01C436-796D88-EA0292,0152CF-9A23B4-75E0E7,01030B-9E8B49-9B4A3C,015F25-032066-F3230A)
 ```
 
-## Cloud Providers
+### Global Options
+
+| Flag | Environment Variable | Description |
+| --- | --- | --- |
+| `-V, --version` | — | Display application version |
+| `-d, --debug` | — | Enable verbose debug logging |
+| `--kion-url` | `KION_URL` | Base URL for Kion API |
+| `--kion-apikey` | `KION_APIKEY` | Authentication token for Kion API |
+| `-h, --help` | — | Show help message |
+
+---
+
+## Provider Setup
 
 ### AWS
 
-`aiphelper` creates an AWS profile for each account and role you have access to based on the account display name and role name. Profile names use the format `<account_name>_<role_name>`, with both values normalized to lowercase, underscores, and a maximum length of 63 characters.
+Discovers AWS accounts via Kion (default) or AWS Identity Center (SSO) and updates `~/.aws/config` and `~/.steampipe/config/aws.spc`. Profile names follow the format `<account_name>_<role_name>` (normalized to lowercase, max 63 characters).
 
-For example, if you have access to `Div Dept My Account 002` with the roles `AdministratorAccess` and `ReadOnlyAccess`, two profiles are created: `div_dept_my_account_002_administratoraccess` and `div_dept_my_account_002_readonlyaccess`.
+#### Options
 
-Profiles are written to the AWS CLI config file, typically `~/.aws/config`. Custom profiles are preserved outside the `### AIPHELPER_MARKER_[START|END] ###` block.
+* `--from-kion`: Use Kion API (default). Requires `kion-cli`.
+* `--from-sso`: Use AWS Identity Center.
+* `--sso-start-url`: AWS SSO Start URL *(Default: `[https://aggie-innovation-platform.awsapps.com/start](https://aggie-innovation-platform.awsapps.com/start)`)*.
+* `--sso-region`: AWS SSO Region *(Default: `us-east-2`)*.
+* `--sso-role-name`: Role to assume across accounts *(Default: `AdministratorAccess`)*.
+* `--regions`: Comma-separated list of target regions for Steampipe.
+* `--accounts`: Comma-separated list of account IDs to target.
+* `--output-format`: Output format for AWS CLI *(Default: `json`)*.
+* `--default-region`: Default AWS region *(Default: `us-east-1`)*.
 
-#### Kion Integration
-
-`aiphelper` can generate AWS profiles from Kion that use `kion-cli` to issue short-term credentials transparently. This is useful for directly using the AWS CLI with Kion-managed accounts and with tools that read AWS CLI profiles, such as Steampipe. Kion is the default account source, but you can explicitly select it with `--from-kion`.
-
-To use this feature, `kion-cli` must be installed and configured. See the [Kion CLI documentation](https://github.com/kionsoftware/kion-cli) for more information.
-
-The Kion URL and API key can be set with `--kion-url` and `--kion-apikey`, or with the `KION_URL` and `KION_APIKEY` environment variables. `aiphelper` does not yet support sharing Kion API credentials with `kion-cli`, but this feature is planned for a future release.
-
-#### AWS Identity Center (SSO)
-
-`aiphelper` can generate AWS profiles from AWS Identity Center. AWS Identity Center is not used for AIP customer access, but is still used for some internal and staff accounts. Use the Kion integration if you are an AIP customer.
-
-To use Identity Center as the account source, pass `--from-sso`. This uses the AWS CLI SSO configuration to generate profiles for each account and role you have access to.
-
-Unlike the Kion integration, the SSO integration supports only a single role per account, specified with `--sso-role-name`. Two profiles are created per account in the formats `aws_<account_name>` and `aws_<account_number>`.
-
-For Steampipe, a single aggregate connector named `aws` is created using the `aws_<account_number>` connectors.
-
-If you already have an AWS CLI SSO token that matches the SSO URL and region, it is used. Otherwise, a new device flow authentication is started and the token is cached to disk for later AWS CLI operations.
-
-### Azure
-
-`aiphelper` requires Azure to already be authenticated. By default, it uses the `DefaultAzureCredential` lookup order: environment variables, managed identity, Azure CLI, and other supported default credential sources. To learn more, see [DefaultAzureCredential](https://pkg.go.dev/github.com/Azure/azure-sdk-for-go/sdk/azidentity#readme-defaultazurecredential).
-
-The easiest way to get started is to authenticate the Azure CLI with `az login`.
-
-Use `--auth-method` when you need a specific authentication source, such as CLI credentials on a virtual machine that also has a managed identity.
-
-### GCP
-
-`aiphelper` discovers GCP projects under a Google Cloud organization and generates Steampipe configuration in `~/.steampipe/config/gcp.spc`. By default, it enumerates projects under organization `874260368814`. To target a different organization, pass `--organization-id`.
-
-The `gcloud` authentication method uses application default credentials from `~/.config/gcloud/application_default_credentials.json`. To use it, authenticate first with `gcloud auth application-default login`, then run `aiphelper gcp --auth-method=gcloud`.
-
-For service account authentication, pass `--auth-method=service-account --service-account-key=<path-to-key.json>`.
-
-By default, only projects linked to the configured billing account IDs are included. Use `--billing-account-ids=` to include all discovered projects, or provide a comma-separated custom list. Project associations are listed once per billing account to avoid Cloud Billing per-project request quotas. The authenticated identity must have `billing.resourceAssociations.list` on each configured billing account.
-
-## Environment Variables
-
-| Variable | Description |
-| --- | --- |
-| `KION_URL` | Kion instance URL for AWS account discovery |
-| `KION_APIKEY` | Kion API key for authentication |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Path to a GCP service account key file for Application Default Credentials |
-
-## Examples
-
-### AWS Usage
+#### Examples
 
 ```bash
-# Generate AWS profiles with the default account source and regions
+# Generate AWS profiles using default settings (Kion)
 aiphelper aws
 
 # Generate AWS profiles for specific regions
 aiphelper aws --regions us-east-1,us-east-2
 
-# AWS CLI command using a generated profile
-aws ec2 describe-instances --profile div_dept_my_account_001_readonlyaccess --filters "Name=tag:Environment,Values=test"
+# Generate AWS profiles using Identity Center (SSO)
+aiphelper aws --from-sso --sso-role-name ReadOnlyAccess
 
-# Steampipe query against a single account connector
-steampipe query 'select * from aws_div_dept_my_account_001_readonlyaccess.ec2_instance where tags["Environment"] = "test"'
+# Query AWS CLI using generated profile
+aws ec2 describe-instances --profile div_dept_my_account_001_readonlyaccess
 
-# Steampipe query across all accounts via aggregate role connector
-steampipe query 'select * from aws_role_readonlyaccess.ec2_instance where tags["Environment"] = "test"'
+# Steampipe: Query single account profile
+steampipe query 'select * from aws_div_dept_my_account_001_readonlyaccess.ec2_instance'
+
+# Steampipe: Query across all accounts via aggregate role connector
+steampipe query 'select * from aws_role_readonlyaccess.ec2_instance'
+
 ```
 
-### GCP Usage
-
-```bash
-# Discover projects in the default organization using gcloud application default credentials
-aiphelper gcp --auth-method=gcloud
-
-# Discover projects in a specific organization using gcloud application default credentials
-aiphelper gcp --organization-id=874260368814 --auth-method=gcloud
-
-# Discover projects in a specific organization using a service account
-aiphelper gcp --organization-id=874260368814 --auth-method=service-account --service-account-key=key.json
-
-# Discover all projects without billing-account filtering
-aiphelper gcp --billing-account-ids=
-
-# Discover projects linked to a custom billing-account list
-aiphelper gcp --billing-account-ids=0165A9-BB7960-BC03A5,01C436-796D88-EA0292
-
-# Query a single project connector in Steampipe
-steampipe query 'select name from gcp_my_project.gcp_project'
-
-# Query all discovered projects using the aggregate connector
-steampipe query 'select name from gcp_all.gcp_project'
-```
-
-## Steampipe
-
-### AWS
-
-`aiphelper` creates one Steampipe connector for each AWS profile for each region specified, defaulting to the AWS CLI default region search order. Connector names use the format `aws_<account_name>_<role_name>`, with account and role names normalized to lowercase, underscores, and a maximum length of 63 characters.
-
-When using Kion as an account source, aggregate connectors are created for each unique role. Connector names use the format `aws_role_<role_name>`. These aggregate connectors allow you to query multiple accounts at once, limited to the accounts that role can access.
-
-For example, if you have access to `Div Dept My Account 001` and `Div Dept My Account 002` with a `ReadOnlyAccess` role, an aggregate connector named `aws_role_readonlyaccess` is created using both `aws_div_dept_my_account_001_readonlyaccess` and `aws_div_dept_my_account_002_readonlyaccess`.
-
-If you use AWS Identity Center as the account source, only one aggregate connector is created, `aws`, using all AWS accounts you have access to.
-
-The Steampipe configuration file is written to `~/.steampipe/config/aws.spc`. Custom connectors and settings are preserved outside the `### AIPHELPER_MARKER_[START|END] ###` block.
+---
 
 ### Azure
 
-`aiphelper` creates a Steampipe connector for each Azure subscription it discovers. It also creates an aggregate connector named `azure_all` with every Azure subscription.
+Discovers accessible Azure Subscriptions and generates `~/.steampipe/config/azure.spc` along with an aggregate connector `azure_all`.
+
+#### Options
+
+* `--tenant-id`: Azure Tenant ID *(Default: `68f381e3-46da-47b9-ba57-6f322b8f0da1`)*.
+* `-g, --enum-mgmt-group`: Enumerate Management Group descendants for subscriptions.
+* `--root-group`: Root Management Group ID to begin search *(Default: `tamu`)*.
+* `--auth-method`: Authentication method (`environment`, `cli`, `managed-identity`, `device-code`, `default`).
+
+#### Examples
+
+```bash
+# Authenticate CLI first
+az login
+
+# Generate Azure Steampipe configuration
+aiphelper azure
+
+# Query all subscriptions in Steampipe
+steampipe query 'select name, subscription_id from azure_all.azure_subscription'
+
+```
+
+---
 
 ### GCP
 
-`aiphelper` creates a Steampipe connector for each GCP project it discovers. It also creates an aggregate connector named `gcp_all` with every discovered project.
+Discovers GCP projects under an organization, filtering by billing accounts where required, and writes configuration to `~/.steampipe/config/gcp.spc`.
 
-### Performance
+#### Options
 
-Limit the number of connectors and tables queried to reduce API calls, especially when using aggregate connectors. Fetch only the precise columns you need from tables instead of selecting every column.
+* `--organization-id`: GCP Organization ID *(Default: `874260368814`)*.
+* `--project-id`: Target specific GCP Project ID.
+* `--auth-method`: Auth method: `default`, `service-account`, or `gcloud` *(Default: `default`)*.
+* `--service-account-key`: Path to service account JSON key file.
+* `--billing-account-ids`: Comma-separated billing IDs to filter projects. Pass empty string (`""`) to disable filtering.
+
+#### Examples
+
+```bash
+# Authenticate via Application Default Credentials
+gcloud auth application-default login
+
+# Discover projects using gcloud ADC
+aiphelper gcp --auth-method=gcloud
+
+# Discover using a service account key
+aiphelper gcp --auth-method=service-account --service-account-key=/path/to/key.json
+
+# Disable billing filtering to fetch all accessible projects
+aiphelper gcp --billing-account-ids=""
+
+# Steampipe: Query a specific project
+steampipe query 'select name from gcp_my_project.gcp_project'
+
+# Steampipe: Query all projects via aggregate connector
+steampipe query 'select name from gcp_all.gcp_project'
+
+```
+
+---
+
+## Environment Variables
+
+| Variable | Description |
+| --- | --- |
+| `KION_URL` | Base URL for the Kion API endpoint |
+| `KION_APIKEY` | API Key for authenticating with Kion |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Path to GCP service account JSON key |
+
+---
+
+## Steampipe Connector Structures
+
+| Cloud Provider | Individual Connector | Aggregate Connector | Config Output Location |
+| --- | --- | --- | --- |
+| **AWS** | `aws_<account_name>_<role>` | `aws_role_<role_name>` (Kion) or `aws` (SSO) | `~/.steampipe/config/aws.spc` |
+| **Azure** | `azure_<subscription_name>` | `azure_all` | `~/.steampipe/config/azure.spc` |
+| **GCP** | `gcp_<project_id>` | `gcp_all` | `~/.steampipe/config/gcp.spc` |
+
+*Tip: For optimal query performance when using aggregate connectors (`aws_role_*`, `azure_all`, `gcp_all`), explicitly define needed columns instead of using `SELECT *`.*
+
+---
 
 ## Troubleshooting
 
-### Authentication Failed
+* **Authentication Errors:** Ensure local CLI credentials are active prior to running `aiphelper` (`az login`, `gcloud auth application-default login`, or `kion-cli`).
+* **Missing GCP Projects:** Verify your identity has `resourcemanager.projects.list` on the organization and `billing.resourceAssociations.list` on target billing accounts.
+* **GCP Cloud Billing API Disabled:** Enable the billing API in your Application Default Credentials (ADC) quota project:
 
-Verify local authentication status with native tools: `az login`, `gcloud auth login`, `gcloud auth application-default login`, or `kion-cli`.
+```bash
+gcloud services enable cloudbilling.googleapis.com --project=YOUR_ADC_PROJECT_ID
+```
 
-### Missing Accounts, Subscriptions, or Projects
-
-Confirm your identity has the required permissions for discovery, such as `resourcemanager.projects.list` for GCP projects.
-
-For the default billing filter, grant `billing.resourceAssociations.list` on each configured billing account. If this permission is denied, the GCP command cannot apply the billing filter.
-
-### Cloud Billing API has not been used in project before or it is disabled
-
-Enable the Cloud Billing API in your ADC quota project.
-
-`gcloud services enable cloudbilling.googleapis.com --project=your-adc-quota-project-id`
-
-### Verbose Output
-
-Append `-d` or `--debug` to any command to enable detailed logs.
+* **Debug Logging:** Append `-d` or `--debug` to any command for detailed diagnostic output.
