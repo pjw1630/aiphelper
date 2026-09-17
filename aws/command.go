@@ -80,11 +80,10 @@ func (o *Options) Execute(args []string) error {
 }
 
 func (r *Regions) UnmarshalFlag(arg string) error {
-	// if len(arg) == 0 {
-	// 	r.All = []string{}
-	// 	return
-	// }
-	log.Println("arg: ", arg)
+	if arg == "" {
+		r.All = []string{}
+		return nil
+	}
 	regions := strings.Split(arg, ",")
 
 	r.All = regions
