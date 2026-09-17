@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/template"
 
 	_ "embed"
@@ -29,7 +30,7 @@ var steampipeTemplateString string
 
 type Options struct {
 	ProjectID            string `long:"project-id" description:"GCP Project ID"`
-	OrganizationID       string `long:"organization-id" description:"GCP Organization ID"`
+	OrganizationID       string `long:"organization-id" default:"874260368814" description:"GCP Organization ID"`
 	AuthenticationMethod string `long:"auth-method" default:"default" description:"Authentication method (default, service-account, gcloud)"`
 	ServiceAccountKey    string `long:"service-account-key" description:"Path to service account key file"`
 }
@@ -105,14 +106,9 @@ func newProjectsClient(ctx context.Context) (*resourcemanager.ProjectsClient, er
 func enumerateProjects(ctx context.Context, client *resourcemanager.ProjectsClient) ([]GcpProject, error) {
 	var projects []GcpProject
 
-	// List projects
-	req := &resourcemanagerpb.ListProjectsRequest{
-		Parent: fmt.Sprintf("organizations/%s", options.OrganizationID),
-	}
-
-	if options.OrganizationID == "" {
-		// If no organization ID, list all accessible projects
-		req = &resourcemanagerpb.ListProjectsRequest{}
+	req, err := listProjectsRequest(options.OrganizationID)
+	if err != nil {
+		return nil, err
 	}
 
 	it := client.ListProjects(ctx, req)
@@ -144,6 +140,17 @@ func enumerateProjects(ctx context.Context, client *resourcemanager.ProjectsClie
 	}
 
 	return projects, nil
+}
+
+func listProjectsRequest(organizationID string) (*resourcemanagerpb.ListProjectsRequest, error) {
+	organizationID = strings.TrimSpace(organizationID)
+	if organizationID == "" {
+		return nil, fmt.Errorf("--organization-id is required")
+	}
+
+	return &resourcemanagerpb.ListProjectsRequest{
+		Parent: fmt.Sprintf("organizations/%s", organizationID),
+	}, nil
 }
 
 func updateSteampipeGcpConfigFile(projects []GcpProject) error {
