@@ -59,9 +59,14 @@ func Init() {
 		log.Fatalf("Failed to create GCP client: %v", err)
 	}
 	defer client.Close()
+	foldersClient, err := newFoldersClient(ctx)
+	if err != nil {
+		log.Fatalf("Failed to create GCP folders client: %v", err)
+	}
+	defer foldersClient.Close()
 
 	// Enumerate projects
-	projects, err := enumerateProjects(ctx, client)
+	projects, err := enumerateProjects(ctx, client, foldersClient)
 	if err != nil {
 		log.Fatalf("Failed to enumerate projects: %v", err)
 	}
@@ -80,6 +85,24 @@ func Init() {
 }
 
 func newProjectsClient(ctx context.Context) (*resourcemanager.ProjectsClient, error) {
+	opts, err := clientOptions(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return resourcemanager.NewProjectsClient(ctx, opts...)
+}
+
+func newFoldersClient(ctx context.Context) (*resourcemanager.FoldersClient, error) {
+	opts, err := clientOptions(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return resourcemanager.NewFoldersClient(ctx, opts...)
+}
+
+func clientOptions(ctx context.Context) ([]option.ClientOption, error) {
 	var opts []option.ClientOption
 
 	switch options.AuthenticationMethod {
@@ -100,20 +123,24 @@ func newProjectsClient(ctx context.Context) (*resourcemanager.ProjectsClient, er
 		opts = append(opts, option.WithCredentials(credentials))
 	}
 
-	return resourcemanager.NewProjectsClient(ctx, opts...)
+	return opts, nil
 }
 
-func enumerateProjects(ctx context.Context, client *resourcemanager.ProjectsClient) ([]GcpProject, error) {
+func enumerateProjects(ctx context.Context, projectsClient *resourcemanager.ProjectsClient, foldersClient *resourcemanager.FoldersClient) ([]GcpProject, error) {
 	var projects []GcpProject
 
-	req, err := listProjectsRequest(options.OrganizationID)
+	parent, err := organizationParent(options.OrganizationID)
 	if err != nil {
 		return nil, err
 	}
 
-	it := client.ListProjects(ctx, req)
+	return enumerateProjectsUnderParent(ctx, projectsClient, foldersClient, parent, projects)
+}
+
+func enumerateProjectsUnderParent(ctx context.Context, projectsClient *resourcemanager.ProjectsClient, foldersClient *resourcemanager.FoldersClient, parent string, projects []GcpProject) ([]GcpProject, error) {
+	projectIt := projectsClient.ListProjects(ctx, &resourcemanagerpb.ListProjectsRequest{Parent: parent})
 	for {
-		project, err := it.Next()
+		project, err := projectIt.Next()
 		if err == iterator.Done {
 			break
 		}
@@ -139,18 +166,41 @@ func enumerateProjects(ctx context.Context, client *resourcemanager.ProjectsClie
 		})
 	}
 
+	folderIt := foldersClient.ListFolders(ctx, &resourcemanagerpb.ListFoldersRequest{Parent: parent})
+	for {
+		folder, err := folderIt.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to iterate folders under %s: %v", parent, err)
+		}
+
+		projects, err = enumerateProjectsUnderParent(ctx, projectsClient, foldersClient, folder.GetName(), projects)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return projects, nil
 }
 
 func listProjectsRequest(organizationID string) (*resourcemanagerpb.ListProjectsRequest, error) {
-	organizationID = strings.TrimSpace(organizationID)
-	if organizationID == "" {
-		return nil, fmt.Errorf("--organization-id is required")
+	parent, err := organizationParent(organizationID)
+	if err != nil {
+		return nil, err
 	}
 
-	return &resourcemanagerpb.ListProjectsRequest{
-		Parent: fmt.Sprintf("organizations/%s", organizationID),
-	}, nil
+	return &resourcemanagerpb.ListProjectsRequest{Parent: parent}, nil
+}
+
+func organizationParent(organizationID string) (string, error) {
+	organizationID = strings.TrimSpace(organizationID)
+	if organizationID == "" {
+		return "", fmt.Errorf("--organization-id is required")
+	}
+
+	return fmt.Sprintf("organizations/%s", organizationID), nil
 }
 
 func updateSteampipeGcpConfigFile(projects []GcpProject) error {

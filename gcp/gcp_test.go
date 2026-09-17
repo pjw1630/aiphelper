@@ -19,3 +19,14 @@ func TestListProjectsRequestRequiresOrganizationID(t *testing.T) {
 		t.Fatal("listProjectsRequest returned nil error for empty organization ID")
 	}
 }
+
+func TestOrganizationParentCanBeUsedForFolderTraversal(t *testing.T) {
+	parent, err := organizationParent("874260368814")
+	if err != nil {
+		t.Fatalf("organizationParent returned error: %v", err)
+	}
+
+	if got, want := parent, "organizations/874260368814"; got != want {
+		t.Fatalf("parent = %q, want %q", got, want)
+	}
+}
